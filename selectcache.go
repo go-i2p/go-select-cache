@@ -79,41 +79,21 @@ func NewDefault() *Middleware {
 // Handler wraps an http.Handler with selective caching
 func (m *Middleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Only attempt caching for GET and HEAD requests
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		// Only cache GET and HEAD requests
+		if !m.isCacheableMethod(r.Method) {
 			next.ServeHTTP(w, r)
 			return
 		}
 
 		key := m.createCacheKey(r)
 
-		// Check cache first
-		if cached, found := m.cache.Get(key); found {
-			if cachedResponse, ok := cached.(*CachedResponse); ok {
-				atomic.AddUint64(&m.hitCount, 1)
-				m.writeCachedResponse(w, r, cachedResponse)
-				return
-			}
-			// Invalid cached data - remove it and continue with cache miss
-			m.cache.Delete(key)
+		// Try to serve from cache first
+		if m.tryServeFromCache(w, r, key) {
+			return
 		}
 
-		// Cache miss - increment counter
-		atomic.AddUint64(&m.missCount, 1)
-
-		// Cache miss - use recorder to capture response
-		recorder := NewResponseRecorder(w)
-		next.ServeHTTP(recorder, r)
-
-		// Cache if response meets criteria
-		if m.shouldCache(recorder) {
-			cachedResp := &CachedResponse{
-				StatusCode: recorder.StatusCode(),
-				Headers:    recorder.Headers(),
-				Body:       recorder.Body(),
-			}
-			m.cache.Set(key, cachedResp, cache.DefaultExpiration)
-		}
+		// Handle cache miss with recording and potential storage
+		m.handleCacheMiss(w, r, key, next)
 	})
 }
 
@@ -205,4 +185,52 @@ func (m *Middleware) Delete(url string) {
 	// Generate the cache key using the same logic as requests
 	key := m.createCacheKey(req)
 	m.cache.Delete(key)
+}
+
+// isCacheableMethod checks if the HTTP method is cacheable
+func (m *Middleware) isCacheableMethod(method string) bool {
+	return method == http.MethodGet || method == http.MethodHead
+}
+
+// tryServeFromCache attempts to serve a response from cache
+func (m *Middleware) tryServeFromCache(w http.ResponseWriter, r *http.Request, key string) bool {
+	cached, found := m.cache.Get(key)
+	if !found {
+		return false
+	}
+
+	cachedResponse, ok := cached.(*CachedResponse)
+	if !ok {
+		// Invalid cached data - remove it
+		m.cache.Delete(key)
+		return false
+	}
+
+	atomic.AddUint64(&m.hitCount, 1)
+	m.writeCachedResponse(w, r, cachedResponse)
+	return true
+}
+
+// handleCacheMiss processes a cache miss by recording the response and storing if appropriate
+func (m *Middleware) handleCacheMiss(w http.ResponseWriter, r *http.Request, key string, next http.Handler) {
+	atomic.AddUint64(&m.missCount, 1)
+
+	recorder := NewResponseRecorder(w)
+	next.ServeHTTP(recorder, r)
+
+	m.storeResponseIfCacheable(key, recorder)
+}
+
+// storeResponseIfCacheable stores the response in cache if it meets caching criteria
+func (m *Middleware) storeResponseIfCacheable(key string, recorder *ResponseRecorder) {
+	if !m.shouldCache(recorder) {
+		return
+	}
+
+	cachedResp := &CachedResponse{
+		StatusCode: recorder.StatusCode(),
+		Headers:    recorder.Headers(),
+		Body:       recorder.Body(),
+	}
+	m.cache.Set(key, cachedResp, cache.DefaultExpiration)
 }

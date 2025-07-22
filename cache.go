@@ -404,14 +404,14 @@ func GenerateCacheKey(method, path, query string, headers map[string]string) str
 	var keyParts []string
 
 	// Add request method
-	keyParts = append(keyParts, method)
+	keyParts = append(keyParts, sanitizeKeyPart(method))
 
 	// Add request path
-	keyParts = append(keyParts, path)
+	keyParts = append(keyParts, sanitizeKeyPart(path))
 
 	// Add sorted query parameters
 	if query != "" {
-		keyParts = append(keyParts, "query="+query)
+		keyParts = append(keyParts, "query="+sanitizeKeyPart(query))
 	}
 
 	// Add sorted headers that affect caching
@@ -423,7 +423,8 @@ func GenerateCacheKey(method, path, query string, headers map[string]string) str
 		sort.Strings(headerKeys)
 
 		for _, k := range headerKeys {
-			keyParts = append(keyParts, k+"="+headers[k])
+			// Sanitize both header key and value to prevent separator collision
+			keyParts = append(keyParts, sanitizeKeyPart(k)+"="+sanitizeKeyPart(headers[k]))
 		}
 	}
 
@@ -431,4 +432,14 @@ func GenerateCacheKey(method, path, query string, headers map[string]string) str
 	keyString := strings.Join(keyParts, "|")
 	hash := sha256.Sum256([]byte(keyString))
 	return hex.EncodeToString(hash[:])[:16] // 16 chars for cache key
+}
+
+// sanitizeKeyPart escapes pipe characters and other separators to prevent cache key collisions
+func sanitizeKeyPart(s string) string {
+	// Replace pipe characters with escaped version to prevent collision with separator
+	// Also escape the escape character itself to handle edge cases
+	s = strings.ReplaceAll(s, "\\", "\\\\") // Escape backslashes first
+	s = strings.ReplaceAll(s, "|", "\\|")   // Escape pipe characters
+	s = strings.ReplaceAll(s, "=", "\\=")   // Escape equals signs
+	return s
 }

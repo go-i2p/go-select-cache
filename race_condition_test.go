@@ -27,9 +27,32 @@ func TestRaceConditionInCloseMethod(t *testing.T) {
 			detector := NewContentDetector(config)
 
 			cachingConn := NewCachingConnection(server, cache, config, metrics, detector)
-
 			var wg sync.WaitGroup
+			var mu sync.Mutex
 			var readErr, writeErr, closeErr error
+
+			// Helper functions to safely set errors
+			setReadErr := func(err error) {
+				mu.Lock()
+				defer mu.Unlock()
+				if readErr == nil {
+					readErr = err
+				}
+			}
+
+			setWriteErr := func(err error) {
+				mu.Lock()
+				defer mu.Unlock()
+				if writeErr == nil {
+					writeErr = err
+				}
+			}
+
+			setCloseErr := func(err error) {
+				mu.Lock()
+				defer mu.Unlock()
+				closeErr = err
+			}
 
 			// Simulate high concurrency scenario with different lock ordering
 			// Start multiple Read operations
@@ -41,7 +64,7 @@ func TestRaceConditionInCloseMethod(t *testing.T) {
 						buffer := make([]byte, 100)
 						_, err := cachingConn.Read(buffer)
 						if err != nil {
-							readErr = err
+							setReadErr(err)
 							return
 						}
 						time.Sleep(1 * time.Millisecond)
@@ -58,7 +81,7 @@ func TestRaceConditionInCloseMethod(t *testing.T) {
 						data := []byte("test data")
 						_, err := cachingConn.Write(data)
 						if err != nil {
-							writeErr = err
+							setWriteErr(err)
 							return
 						}
 						time.Sleep(1 * time.Millisecond)
@@ -71,7 +94,7 @@ func TestRaceConditionInCloseMethod(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				time.Sleep(10 * time.Millisecond) // Let read/write operations start
-				closeErr = cachingConn.Close()
+				setCloseErr(cachingConn.Close())
 			}()
 
 			// Handle network I/O to prevent blocking
@@ -102,16 +125,21 @@ func TestRaceConditionInCloseMethod(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatalf("DEADLOCK: Operations did not complete within timeout - potential race condition")
 			}
-
 			// Check for errors (other than expected ones after close)
-			if readErr != nil && !isConnectionClosed(readErr) {
-				t.Errorf("Unexpected read error: %v", readErr)
+			mu.Lock()
+			checkReadErr := readErr
+			checkWriteErr := writeErr
+			checkCloseErr := closeErr
+			mu.Unlock()
+
+			if checkReadErr != nil && !isConnectionClosed(checkReadErr) {
+				t.Errorf("Unexpected read error: %v", checkReadErr)
 			}
-			if writeErr != nil && !isConnectionClosed(writeErr) {
-				t.Errorf("Unexpected write error: %v", writeErr)
+			if checkWriteErr != nil && !isConnectionClosed(checkWriteErr) {
+				t.Errorf("Unexpected write error: %v", checkWriteErr)
 			}
-			if closeErr != nil {
-				t.Errorf("Close error: %v", closeErr)
+			if checkCloseErr != nil {
+				t.Errorf("Close error: %v", checkCloseErr)
 			}
 		})
 	}

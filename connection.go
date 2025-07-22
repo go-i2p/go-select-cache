@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -418,47 +417,28 @@ func (c *CachingConnection) analyzeAndCacheResponseFromBuffer(responseBuffer []b
 	c.writeMu.Unlock()
 }
 
-// parseHTTPResponse parses HTTP response headers and creates a response object
+// parseHTTPResponse parses HTTP response using Go's standard library for better performance and compatibility
 func (c *CachingConnection) parseHTTPResponse(headerData, bodyData []byte) (*http.Response, error) {
-	// Parse status line
-	lines := bytes.Split(headerData, []byte("\n"))
-	if len(lines) == 0 {
-		return nil, fmt.Errorf("no status line")
+	// Reconstruct the full HTTP response for standard library parsing
+	fullResponse := make([]byte, 0, len(headerData)+4+len(bodyData))
+	fullResponse = append(fullResponse, headerData...)
+	fullResponse = append(fullResponse, []byte("\r\n\r\n")...)
+	fullResponse = append(fullResponse, bodyData...)
+
+	// Use Go's standard http.ReadResponse for parsing
+	reader := bufio.NewReader(bytes.NewReader(fullResponse))
+
+	// Create a minimal request (required by ReadResponse but not used for parsing)
+	req := &http.Request{Method: "GET"}
+
+	resp, err := http.ReadResponse(reader, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTTP response: %w", err)
 	}
 
-	statusLine := string(bytes.TrimSpace(lines[0]))
-	parts := strings.SplitN(statusLine, " ", 3)
-	if len(parts) < 2 {
-		return nil, fmt.Errorf("invalid status line")
-	}
-
-	// Parse status code
-	var statusCode int
-	if _, err := fmt.Sscanf(parts[1], "%d", &statusCode); err != nil {
-		return nil, fmt.Errorf("invalid status code: %s", parts[1])
-	}
-
-	// Parse headers
-	headers := make(http.Header)
-	for i := 1; i < len(lines); i++ {
-		line := strings.TrimSpace(string(lines[i]))
-		if line == "" {
-			break
-		}
-
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-		headers.Add(key, value)
-	}
-
-	resp := &http.Response{
-		StatusCode: statusCode,
-		Header:     headers,
+	// Close the response body to avoid resource leaks (we already have the body data)
+	if resp.Body != nil {
+		resp.Body.Close()
 	}
 
 	return resp, nil

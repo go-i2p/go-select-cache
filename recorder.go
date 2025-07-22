@@ -14,18 +14,20 @@ type CachedResponse struct {
 // ResponseRecorder captures HTTP responses for caching
 type ResponseRecorder struct {
 	http.ResponseWriter
-	statusCode int
-	headers    http.Header
-	body       []byte
-	written    bool
+	statusCode    int
+	headers       http.Header
+	body          []byte
+	written       bool
+	requestMethod string // Track request method to handle HEAD requests properly
 }
 
 // NewResponseRecorder creates a new response recorder
-func NewResponseRecorder(w http.ResponseWriter) *ResponseRecorder {
+func NewResponseRecorder(w http.ResponseWriter, requestMethod string) *ResponseRecorder {
 	return &ResponseRecorder{
 		ResponseWriter: w,
 		statusCode:     200, // Default status
 		headers:        make(http.Header),
+		requestMethod:  requestMethod,
 	}
 }
 
@@ -52,10 +54,13 @@ func (r *ResponseRecorder) Write(data []byte) (int, error) {
 		r.WriteHeader(200) // Implicit 200 if not set
 	}
 
-	// Store body for caching
-	r.body = append(r.body, data...)
+	// For HEAD requests, don't store body data to save memory
+	// HEAD responses should only cache headers
+	if r.requestMethod != "HEAD" {
+		r.body = append(r.body, data...)
+	}
 
-	// Write to actual response
+	// Write to actual response (this will also be suppressed by HTTP server for HEAD)
 	return r.ResponseWriter.Write(data)
 }
 

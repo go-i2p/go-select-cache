@@ -229,7 +229,7 @@ func (m *Middleware) tryServeFromCache(w http.ResponseWriter, r *http.Request, k
 func (m *Middleware) handleCacheMiss(w http.ResponseWriter, r *http.Request, key string, next http.Handler) {
 	atomic.AddUint64(&m.missCount, 1)
 
-	recorder := NewResponseRecorder(w)
+	recorder := NewResponseRecorder(w, r.Method)
 	next.ServeHTTP(recorder, r)
 
 	m.storeResponseIfCacheable(key, recorder)

@@ -14,6 +14,11 @@ import (
 	"time"
 )
 
+const (
+	// Maximum buffer size to prevent memory leaks - 1MB should be sufficient for most HTTP requests/responses
+	maxBufferSize = 1024 * 1024
+)
+
 // CachingConnection wraps a net.Conn to provide transparent response caching
 type CachingConnection struct {
 	net.Conn
@@ -81,15 +86,27 @@ func (c *CachingConnection) Read(b []byte) (int, error) {
 	if err != nil {
 		return n, err
 	}
-
 	// Only lock for buffer operations
 	c.readMu.Lock()
+
+	// Check buffer size limit to prevent memory leaks
+	if len(c.requestBuffer)+n > maxBufferSize {
+		// Clear buffer and reset to prevent unbounded growth
+		c.requestBuffer = c.requestBuffer[:0]
+	}
+
 	c.requestBuffer = append(c.requestBuffer, b[:n]...)
 
 	// Check if we need to parse HTTP request
 	needsParsing := !c.isHTTPRequest && len(c.requestBuffer) > 0
 	requestBufferCopy := make([]byte, len(c.requestBuffer))
 	copy(requestBufferCopy, c.requestBuffer)
+
+	// If buffer is getting large and we can't parse HTTP, clear it
+	if len(c.requestBuffer) > 8192 && !c.isHTTPRequest {
+		c.requestBuffer = c.requestBuffer[:0]
+	}
+
 	c.readMu.Unlock()
 
 	// Parse request outside of locks if needed
@@ -162,10 +179,23 @@ func (c *CachingConnection) writeAndBufferResponse(b []byte) (int, error) {
 	if err != nil {
 		return n, err
 	}
-
 	// Only lock for buffer operations
 	c.writeMu.Lock()
+
+	// Check buffer size limit to prevent memory leaks
+	if len(c.responseBuffer)+len(b) > maxBufferSize {
+		// Clear buffer and reset to prevent unbounded growth
+		c.responseBuffer = c.responseBuffer[:0]
+	}
+
 	c.responseBuffer = append(c.responseBuffer, b...)
+
+	// If response buffer is getting large and we haven't analyzed yet, clear it periodically
+	// This prevents memory buildup for non-HTTP traffic or failed parsing
+	if len(c.responseBuffer) > 16384 { // 16KB threshold
+		c.responseBuffer = c.responseBuffer[:0]
+	}
+
 	c.writeMu.Unlock()
 
 	return n, err
@@ -215,6 +245,15 @@ func (c *CachingConnection) Close() error {
 	}
 
 	c.closed = true
+
+	// Clear buffers to free memory immediately
+	c.readMu.Lock()
+	c.requestBuffer = nil
+	c.readMu.Unlock()
+
+	c.writeMu.Lock()
+	c.responseBuffer = nil
+	c.writeMu.Unlock()
 
 	// Call the close callback if set
 	if c.closeCallback != nil {
@@ -286,6 +325,11 @@ func (c *CachingConnection) tryParseHTTPRequestFromBuffer(requestBuffer []byte) 
 	c.currentRequest = req
 	c.stateMu.Unlock()
 
+	// Clear request buffer after successful parsing to prevent memory leaks
+	c.readMu.Lock()
+	c.requestBuffer = c.requestBuffer[:0]
+	c.readMu.Unlock()
+
 	// Generate cache key for GET and HEAD requests
 	if req.Method == "GET" || req.Method == "HEAD" {
 		headers := make(map[string]string)
@@ -355,6 +399,11 @@ func (c *CachingConnection) analyzeAndCacheResponseFromBuffer(responseBuffer []b
 			c.metrics.RecordError("cache_store_failed")
 		}
 	}
+
+	// Clear response buffer after successful analysis to prevent memory leaks
+	c.writeMu.Lock()
+	c.responseBuffer = c.responseBuffer[:0]
+	c.writeMu.Unlock()
 }
 
 // parseHTTPResponse parses HTTP response headers and creates a response object

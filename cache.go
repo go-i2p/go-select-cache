@@ -274,6 +274,12 @@ func (c *TTLCache) Close() {
 	})
 }
 
+// entryWithKey pairs a cache key with its entry for sorting operations
+type entryWithKey struct {
+	key   string
+	entry *CacheEntry
+}
+
 // evictLRU removes least recently used entries to free up the specified amount of memory
 // Must be called with write lock held
 func (c *TTLCache) evictLRU(bytesToFree uint64) int {
@@ -281,22 +287,29 @@ func (c *TTLCache) evictLRU(bytesToFree uint64) int {
 		return 0
 	}
 
-	// Create a slice of entries sorted by access time (oldest first)
-	type entryWithKey struct {
-		key   string
-		entry *CacheEntry
-	}
+	sortedEntries := c.buildSortableEntries()
+	c.sortEntriesByAccessTime(sortedEntries)
+	return c.performEviction(sortedEntries, bytesToFree)
+}
 
+// buildSortableEntries creates a slice of entries with their keys for LRU processing
+func (c *TTLCache) buildSortableEntries() []entryWithKey {
 	entries := make([]entryWithKey, 0, len(c.entries))
 	for key, entry := range c.entries {
 		entries = append(entries, entryWithKey{key: key, entry: entry})
 	}
+	return entries
+}
 
-	// Sort by access time (oldest first)
+// sortEntriesByAccessTime sorts entries by access time with oldest entries first
+func (c *TTLCache) sortEntriesByAccessTime(entries []entryWithKey) {
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].entry.AccessTime.Before(entries[j].entry.AccessTime)
 	})
+}
 
+// performEviction removes entries from cache until the specified bytes are freed
+func (c *TTLCache) performEviction(entries []entryWithKey, bytesToFree uint64) int {
 	var freedBytes uint64
 	evicted := 0
 

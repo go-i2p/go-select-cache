@@ -5,9 +5,10 @@ import (
 	"testing"
 )
 
-// TestCacheKeyInconsistency reproduces the cache key inconsistency bug between
-// selectcache.go and cache.go implementations
-func TestCacheKeyInconsistency(t *testing.T) {
+// TestCacheKeyConsistencyFixed verifies the cache key inconsistency fix between
+// selectcache.go and cache.go implementations is working properly
+// This is a negative test confirming the issue from AUDIT.md is resolved
+func TestCacheKeyConsistencyFixed(t *testing.T) {
 	// Create a test HTTP request
 	req, err := http.NewRequest("GET", "http://example.com/api/data?id=123&sort=name", nil)
 	if err != nil {
@@ -39,23 +40,26 @@ func TestCacheKeyInconsistency(t *testing.T) {
 
 	cacheGoKey := GenerateCacheKey(req.Method, req.URL.Path, query, headers)
 
-	// The bug: these should be the same for the same request, but they're different
-	if selectcacheKey == cacheGoKey {
-		t.Errorf("Expected cache keys to be different (demonstrating the bug), but they were the same: %s", selectcacheKey)
+	// FIXED: These should now be the same for the same request (confirming the fix)
+	if selectcacheKey != cacheGoKey {
+		t.Errorf("CACHE KEY INCONSISTENCY DETECTED: Keys should be the same after fix:")
+		t.Errorf("  selectcache.go key: %s", selectcacheKey)
+		t.Errorf("  cache.go key:      %s", cacheGoKey)
+		t.Errorf("This indicates the cache key consistency fix is not working properly")
+	} else {
+		t.Logf("SUCCESS: Cache key consistency fix verified - both methods generate: %s", selectcacheKey)
 	}
 
-	t.Logf("Cache key inconsistency confirmed:")
-	t.Logf("  selectcache.go key: %s", selectcacheKey)
-	t.Logf("  cache.go key:      %s", cacheGoKey)
+	t.Logf("Cache key consistency test results:")
 	t.Logf("  Request URL:       %s", req.URL.String())
 	t.Logf("  Method:            %s", req.Method)
 	t.Logf("  Path:              %s", req.URL.Path)
 	t.Logf("  Query:             %s", req.URL.RawQuery)
 }
 
-// TestCacheKeyConsistencyAfterFix will verify the fix works
+// TestCacheKeyConsistencyAfterFix verifies the fix works (redundant but keeping for completeness)
 func TestCacheKeyConsistencyAfterFix(t *testing.T) {
-	// This test will pass after we fix the inconsistency
+	// This test confirms the fix is working properly
 
 	// Create a test HTTP request
 	req, err := http.NewRequest("GET", "http://example.com/api/data?id=123&sort=name", nil)
@@ -88,18 +92,18 @@ func TestCacheKeyConsistencyAfterFix(t *testing.T) {
 
 	cacheGoKey := GenerateCacheKey(req.Method, req.URL.Path, query, headers)
 
-	// After fix: these should be the same for the same request
+	// FIXED: These should be the same for the same request (confirming the fix works)
 	if selectcacheKey != cacheGoKey {
 		t.Errorf("Cache keys should be consistent after fix:")
 		t.Errorf("  selectcache.go key: %s", selectcacheKey)
 		t.Errorf("  cache.go key:      %s", cacheGoKey)
+		t.Errorf("This indicates the fix is not working properly")
+	} else {
+		t.Logf("SUCCESS: Cache key consistency verified - both methods generate: %s", selectcacheKey)
 	}
-
-	t.Logf("Cache key consistency verified:")
-	t.Logf("  Both methods generate: %s", selectcacheKey)
 }
 
-// TestMultipleRequestsCacheKeyConsistency tests consistency across different requests
+// TestMultipleRequestsCacheKeyConsistency verifies consistency across different requests (confirms fix)
 func TestMultipleRequestsCacheKeyConsistency(t *testing.T) {
 	testCases := []struct {
 		name    string
@@ -158,14 +162,15 @@ func TestMultipleRequestsCacheKeyConsistency(t *testing.T) {
 
 			cacheGoKey := GenerateCacheKey(req.Method, req.URL.Path, query, tc.headers)
 
-			// Currently they will be different (bug), after fix they should be same
+			// FIXED: With the fix in place, these should be the same
 			t.Logf("Request: %s %s", tc.method, tc.url)
 			t.Logf("  selectcache.go key: %s", selectcacheKey)
 			t.Logf("  cache.go key:      %s", cacheGoKey)
 
-			// This will fail until we fix the inconsistency
 			if selectcacheKey != cacheGoKey {
-				t.Logf("Cache key inconsistency detected (expected until fix applied)")
+				t.Errorf("Cache key inconsistency still exists for %s (fix not working properly)", tc.name)
+			} else {
+				t.Logf("SUCCESS: Cache key consistency verified for %s", tc.name)
 			}
 		})
 	}

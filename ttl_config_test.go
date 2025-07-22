@@ -8,6 +8,7 @@ import (
 
 // TestTTLConfigurationAppliedInTransportLayer verifies that per-content-type
 // TTL configuration is properly applied in the transport layer caching
+// This is a negative test confirming the issue from AUDIT.md is resolved
 func TestTTLConfigurationAppliedInTransportLayer(t *testing.T) {
 	// Create config with specific TTL for different content types
 	config := &CacheConfig{
@@ -69,14 +70,17 @@ func TestTTLConfigurationAppliedInTransportLayer(t *testing.T) {
 			// Analyze the response
 			analysis := detector.AnalyzeResponse(tc.responseBody, headers, tc.statusCode)
 
-			// Verify the TTL is correctly determined
+			// FIXED: Verify the TTL is correctly determined (confirming the fix works)
 			if !analysis.IsCacheable {
 				t.Fatal("Response should be cacheable")
 			}
 
 			if analysis.RecommendedTTL != tc.expectedTTL {
-				t.Errorf("Expected TTL %v, got %v for content type %s",
+				t.Errorf("TTL CONFIGURATION NOT APPLIED: Expected TTL %v, got %v for content type %s",
 					tc.expectedTTL, analysis.RecommendedTTL, tc.contentType)
+				t.Errorf("This indicates the TTL configuration fix is not working properly")
+			} else {
+				t.Logf("SUCCESS: TTL configuration correctly applied - %v for %s", tc.expectedTTL, tc.contentType)
 			}
 
 			// Also verify content type is correctly parsed

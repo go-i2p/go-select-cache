@@ -7,7 +7,8 @@ import (
 	"time"
 )
 
-// TestDeadlockFixed tests that the deadlock issue has been resolved
+// TestDeadlockFixed verifies that the deadlock issue has been resolved
+// This is a negative test confirming the issue from AUDIT.md is resolved
 func TestDeadlockFixed(t *testing.T) {
 	// Create a pipe for testing
 	client, server := net.Pipe()
@@ -66,23 +67,23 @@ func TestDeadlockFixed(t *testing.T) {
 		close(done)
 	}()
 
-	// Verify operations complete without deadlock
+	// Verify operations complete without deadlock (confirming the fix)
 	select {
 	case <-done:
-		// Success - operations completed without deadlock
+		// SUCCESS - operations completed without deadlock
 		if readErr != nil && readErr.Error() != "EOF" && readErr.Error() != "use of closed network connection" {
 			t.Errorf("Unexpected read error: %v", readErr)
 		}
 		if writeErr != nil && writeErr.Error() != "use of closed network connection" {
 			t.Errorf("Unexpected write error: %v", writeErr)
 		}
-		t.Log("SUCCESS: Read and Write operations completed concurrently without deadlock")
+		t.Log("SUCCESS: Read and Write operations completed concurrently without deadlock - fix verified")
 	case <-time.After(3 * time.Second):
-		t.Fatal("FAILED: Operations timed out - deadlock still exists")
+		t.Fatal("DEADLOCK DETECTED: Operations timed out - the deadlock fix is not working properly")
 	}
 }
 
-// TestConcurrentOperations tests multiple concurrent read/write operations
+// TestConcurrentOperations verifies multiple concurrent read/write operations work properly (confirms fix)
 func TestConcurrentOperations(t *testing.T) {
 	// Create a pipe for testing
 	client, server := net.Pipe()
@@ -146,8 +147,8 @@ func TestConcurrentOperations(t *testing.T) {
 
 	select {
 	case <-done:
-		t.Log("SUCCESS: All concurrent operations completed")
+		t.Log("SUCCESS: All concurrent operations completed - deadlock fix verified")
 	case <-time.After(5 * time.Second):
-		t.Fatal("FAILED: Concurrent operations timed out")
+		t.Fatal("DEADLOCK DETECTED: Concurrent operations timed out - fix not working properly")
 	}
 }

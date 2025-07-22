@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-// TestHEADRequestBodyCachingWaste reproduces the bug where HEAD requests
-// cache response body data unnecessarily, wasting memory
-func TestHEADRequestBodyCachingWaste(t *testing.T) {
+// TestHEADRequestBodyCachingFixed verifies the fix for HEAD requests not caching unnecessary body data
+// This is a negative test confirming the issue from AUDIT.md is resolved
+func TestHEADRequestBodyCachingFixed(t *testing.T) {
 	middleware := NewDefault()
 
 	// Create a handler that generates a large response body
@@ -50,8 +50,8 @@ func TestHEADRequestBodyCachingWaste(t *testing.T) {
 		t.Error("HEAD response should have same headers as GET")
 	}
 
-	// Now check if cached entry contains body data
-	// Note: Since GET and HEAD share cache keys, HEAD will reuse GET's cache entry
+	// Check if cached entry contains body data
+	// With the fix: GET and HEAD share cache keys, HEAD reuses GET's cache entry
 	// This is correct behavior - the issue was when HEAD-only requests cache body data
 	key := middleware.createCacheKey(reqGET) // Same key for GET and HEAD
 	if cached, found := middleware.GetCacheForTesting().Get(key); found {
@@ -59,14 +59,18 @@ func TestHEADRequestBodyCachingWaste(t *testing.T) {
 			bodySize := len(cachedResp.Body)
 			t.Logf("Cache contains %d bytes of body data from GET request", bodySize)
 			if bodySize == 10240 {
-				t.Logf("This is correct: HEAD reuses GET cache entry which includes body data")
+				t.Logf("SUCCESS: This is correct behavior - HEAD reuses GET cache entry which includes body data")
+			} else {
+				t.Errorf("Expected cached body size to be 10240 bytes from GET request, got %d", bodySize)
 			}
 		}
+	} else {
+		t.Error("Expected cache entry to exist from GET request")
 	}
 }
 
-// TestHEADOnlyRequestBodyCaching tests caching when only HEAD request is made
-func TestHEADOnlyRequestBodyCaching(t *testing.T) {
+// TestHEADOnlyRequestBodyCachingFixed verifies HEAD-only requests don't cache body data (confirms fix)
+func TestHEADOnlyRequestBodyCachingFixed(t *testing.T) {
 	middleware := NewDefault()
 
 	// Create a handler that would generate a large response body if called with GET
@@ -89,18 +93,18 @@ func TestHEADOnlyRequestBodyCaching(t *testing.T) {
 	recorderHEAD := httptest.NewRecorder()
 	handler.ServeHTTP(recorderHEAD, reqHEAD)
 
-	// Check cached entry - this tests the fix
+	// Check cached entry - this verifies the fix is working
 	key := middleware.createCacheKey(reqHEAD)
 	if cached, found := middleware.GetCacheForTesting().Get(key); found {
 		if cachedResp, ok := cached.(*CachedResponse); ok {
 			bodySize := len(cachedResp.Body)
 			t.Logf("HEAD request cached %d bytes of body data", bodySize)
 
-			// The fix: HEAD requests should not cache body data
+			// FIXED: HEAD requests should not cache body data
 			if bodySize > 0 {
-				t.Errorf("BUG: HEAD request cached %d bytes of unnecessary body data", bodySize)
-				t.Logf("Expected: HEAD requests should cache headers only (0 bytes body)")
-				t.Logf("Actual: HEAD request cached full response body, wasting memory")
+				t.Errorf("HEAD REQUEST BODY CACHING BUG DETECTED: HEAD request cached %d bytes of unnecessary body data", bodySize)
+				t.Errorf("Expected: HEAD requests should cache headers only (0 bytes body)")
+				t.Errorf("This indicates the HEAD request fix is not working properly")
 			} else {
 				t.Logf("SUCCESS: HEAD request correctly cached only headers, no body data")
 			}
@@ -108,6 +112,8 @@ func TestHEADOnlyRequestBodyCaching(t *testing.T) {
 			// Verify headers are still cached
 			if cachedResp.Headers.Get("Content-Type") != "application/json" {
 				t.Error("Headers should still be cached for HEAD requests")
+			} else {
+				t.Logf("SUCCESS: Headers correctly cached for HEAD request")
 			}
 		}
 	} else {

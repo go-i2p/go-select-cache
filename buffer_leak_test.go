@@ -55,8 +55,9 @@ func (m *mockConn) writeToReadBuffer(data []byte) {
 	m.readBuffer.Write(data)
 }
 
-// TestConnectionBufferMemoryLeak reproduces the critical buffer memory leak bug
-func TestConnectionBufferMemoryLeak(t *testing.T) {
+// TestConnectionBufferMemoryLeakNowFixed verifies the critical buffer memory leak bug is resolved
+// This is a negative test confirming the issue from AUDIT.md is resolved
+func TestConnectionBufferMemoryLeakNowFixed(t *testing.T) {
 	// Create test dependencies
 	config := &CacheConfig{
 		DefaultTTL:      time.Minute * 5,
@@ -109,28 +110,46 @@ func TestConnectionBufferMemoryLeak(t *testing.T) {
 		}
 	}
 
-	// Check if buffers have grown without bounds
+	// Check if buffers have been properly managed (confirming the fix)
 	finalRequestBufferLen := len(cachingConn.requestBuffer)
 	finalResponseBufferLen := len(cachingConn.responseBuffer)
 
-	// The bug: buffers continuously grow with each request/response
-	expectedRequestGrowth := len(requestData) * 10
-	expectedResponseGrowth := len(responseData) * 10
+	// FIXED: With the fix in place, buffers should NOT grow unboundedly
+	// They should be cleared periodically or stay within reasonable limits
+	expectedRequestGrowth := len(requestData) * 10   // This was the old buggy behavior
+	expectedResponseGrowth := len(responseData) * 10 // This was the old buggy behavior
 
-	if finalRequestBufferLen != initialRequestBufferLen+expectedRequestGrowth {
-		t.Errorf("Request buffer grew from %d to %d bytes (growth: %d), expected growth: %d",
-			initialRequestBufferLen, finalRequestBufferLen,
-			finalRequestBufferLen-initialRequestBufferLen, expectedRequestGrowth)
+	// The fix should prevent unbounded growth
+	if finalRequestBufferLen == initialRequestBufferLen+expectedRequestGrowth {
+		t.Errorf("MEMORY LEAK DETECTED: Request buffer grew unboundedly as before the fix: %d->%d bytes",
+			initialRequestBufferLen, finalRequestBufferLen)
+		t.Errorf("This indicates the buffer management fix is not working")
+	} else {
+		t.Logf("SUCCESS: Request buffer growth controlled - grew to %d bytes instead of expected unbounded %d bytes",
+			finalRequestBufferLen, initialRequestBufferLen+expectedRequestGrowth)
 	}
 
-	if finalResponseBufferLen != initialResponseBufferLen+expectedResponseGrowth {
-		t.Errorf("Response buffer grew from %d to %d bytes (growth: %d), expected growth: %d",
-			initialResponseBufferLen, finalResponseBufferLen,
-			finalResponseBufferLen-initialResponseBufferLen, expectedResponseGrowth)
+	if finalResponseBufferLen == initialResponseBufferLen+expectedResponseGrowth {
+		t.Errorf("MEMORY LEAK DETECTED: Response buffer grew unboundedly as before the fix: %d->%d bytes",
+			initialResponseBufferLen, finalResponseBufferLen)
+		t.Errorf("This indicates the buffer management fix is not working")
+	} else {
+		t.Logf("SUCCESS: Response buffer growth controlled - grew to %d bytes instead of expected unbounded %d bytes",
+			finalResponseBufferLen, initialResponseBufferLen+expectedResponseGrowth)
 	}
 
-	// This test demonstrates the memory leak - buffers should be cleared after processing
-	t.Logf("Buffer growth detected - Request buffer: %d->%d bytes, Response buffer: %d->%d bytes",
+	// Additional check: buffers should stay within reasonable bounds
+	maxReasonableSize := 16384 // 16KB threshold from the fix
+	if finalRequestBufferLen > maxReasonableSize || finalResponseBufferLen > maxReasonableSize {
+		t.Errorf("MEMORY LEAK: Buffers exceeded reasonable size - Request: %d, Response: %d (max: %d)",
+			finalRequestBufferLen, finalResponseBufferLen, maxReasonableSize)
+	} else {
+		t.Logf("SUCCESS: Buffers stayed within reasonable limits - Request: %d, Response: %d (max: %d)",
+			finalRequestBufferLen, finalResponseBufferLen, maxReasonableSize)
+	}
+
+	// This test confirms the memory leak fix is working
+	t.Logf("Memory leak fix verified - Request buffer: %d->%d bytes, Response buffer: %d->%d bytes",
 		initialRequestBufferLen, finalRequestBufferLen,
 		initialResponseBufferLen, finalResponseBufferLen)
 }

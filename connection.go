@@ -237,16 +237,17 @@ func (c *CachingConnection) shouldAnalyzeResponse(b []byte) bool {
 
 // Close closes the connection and performs cleanup
 func (c *CachingConnection) Close() error {
-	c.stateMu.Lock()
-	defer c.stateMu.Unlock()
+	// Check if already closed first (without holding locks for long)
+	c.stateMu.RLock()
+	alreadyClosed := c.closed
+	c.stateMu.RUnlock()
 
-	if c.closed {
+	if alreadyClosed {
 		return nil
 	}
 
-	c.closed = true
-
-	// Clear buffers to free memory immediately
+	// Clear buffers first (avoiding lock ordering issues)
+	// Do this before acquiring stateMu to prevent deadlock
 	c.readMu.Lock()
 	c.requestBuffer = nil
 	c.readMu.Unlock()
@@ -254,6 +255,17 @@ func (c *CachingConnection) Close() error {
 	c.writeMu.Lock()
 	c.responseBuffer = nil
 	c.writeMu.Unlock()
+
+	// Now acquire state lock and set closed flag
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+
+	// Double-check to prevent race condition
+	if c.closed {
+		return nil
+	}
+
+	c.closed = true
 
 	// Call the close callback if set
 	if c.closeCallback != nil {

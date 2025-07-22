@@ -76,18 +76,22 @@ func (c *TTLCache) Get(key string) (*CacheEntry, bool) {
 	start := time.Now()
 	defer c.recordLookupMetrics(start)
 
-	entry, exists := c.retrieveEntry(key)
+	// Use write lock since we need to update access time
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	entry, exists := c.entries[key]
 	if !exists {
 		c.recordCacheMiss()
 		return nil, false
 	}
 
 	if entry.IsExpired() {
-		c.removeExpiredEntry(key, entry)
+		c.removeExpiredEntryUnsafe(key, entry)
 		return nil, false
 	}
 
-	// Update access time for LRU
+	// Update access time for LRU (now safe under write lock)
 	entry.UpdateAccessTime()
 	c.recordCacheHit()
 
@@ -129,6 +133,18 @@ func (c *TTLCache) removeExpiredEntry(key string, entry *CacheEntry) {
 	delete(c.entries, key)
 	c.currentMemoryBytes -= uint64(entry.Size)
 	c.mu.Unlock()
+
+	if c.metrics != nil {
+		c.metrics.RecordMiss()
+		c.metrics.UpdateMemoryUsage(c.currentMemoryBytes, len(c.entries))
+	}
+}
+
+// removeExpiredEntryUnsafe removes an expired cache entry without acquiring locks.
+// Caller must already hold the write lock.
+func (c *TTLCache) removeExpiredEntryUnsafe(key string, entry *CacheEntry) {
+	delete(c.entries, key)
+	c.currentMemoryBytes -= uint64(entry.Size)
 
 	if c.metrics != nil {
 		c.metrics.RecordMiss()

@@ -1,7 +1,6 @@
 package selectcache
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -19,12 +18,7 @@ func TestTypeAssertionPanic(t *testing.T) {
 	req := httptest.NewRequest("GET", "/test", nil)
 
 	// Get the cache key that will be used
-	h := sha256.New()
-	h.Write([]byte(req.URL.String()))
-	h.Write([]byte(req.Header.Get("Accept")))
-	h.Write([]byte(req.Header.Get("Accept-Encoding")))
-	h.Write([]byte(req.Header.Get("Accept-Language")))
-	key := fmt.Sprintf("%x", h.Sum(nil))[:16]
+	key := middleware.createCacheKey(req)
 
 	// Manually corrupt the cache with invalid data
 	middleware.GetCacheForTesting().Set(key, "invalid-data-type", cache.DefaultExpiration)
@@ -64,13 +58,8 @@ func TestInvalidCacheDataRemoval(t *testing.T) {
 	middleware := NewDefault()
 	req := httptest.NewRequest("GET", "/test", nil)
 
-	// Calculate the cache key
-	h := sha256.New()
-	h.Write([]byte(req.URL.String()))
-	h.Write([]byte(req.Header.Get("Accept")))
-	h.Write([]byte(req.Header.Get("Accept-Encoding")))
-	h.Write([]byte(req.Header.Get("Accept-Language")))
-	key := fmt.Sprintf("%x", h.Sum(nil))[:16]
+	// Calculate the cache key using the same method as the middleware
+	key := middleware.createCacheKey(req)
 
 	// Insert invalid data
 	middleware.GetCacheForTesting().Set(key, "corrupted-data", cache.DefaultExpiration)

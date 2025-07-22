@@ -5,8 +5,6 @@
 package selectcache
 
 import (
-	"crypto/sha256"
-	"fmt"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -104,13 +102,29 @@ func (m *Middleware) HandlerFunc(next http.HandlerFunc) http.Handler {
 
 // createCacheKey generates a cache key from the request
 func (m *Middleware) createCacheKey(r *http.Request) string {
-	h := sha256.New()
-	h.Write([]byte(r.URL.String()))
-	// Include request headers that affect response content
-	h.Write([]byte(r.Header.Get("Accept")))
-	h.Write([]byte(r.Header.Get("Accept-Encoding")))
-	h.Write([]byte(r.Header.Get("Accept-Language")))
-	return fmt.Sprintf("%x", h.Sum(nil))[:16] // 16 chars sufficient for cache key
+	// Use the same cache key generation logic as cache.go for consistency
+	// but treat GET and HEAD as the same for caching purposes (HEAD reuses GET cache)
+	headers := make(map[string]string)
+
+	// Include caching-relevant headers
+	for _, header := range []string{"Accept", "Accept-Encoding", "Accept-Language", "Authorization"} {
+		if value := r.Header.Get(header); value != "" {
+			headers[header] = value
+		}
+	}
+
+	query := ""
+	if r.URL.RawQuery != "" {
+		query = r.URL.RawQuery
+	}
+
+	// For HEAD requests, use GET method in cache key so they share cache entries
+	method := r.Method
+	if method == "HEAD" {
+		method = "GET"
+	}
+
+	return GenerateCacheKey(method, r.URL.Path, query, headers)
 }
 
 // shouldCache determines if a response should be cached

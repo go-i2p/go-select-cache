@@ -153,34 +153,14 @@ func (d *ContentDetector) DetectContentTypeFromBytes(data []byte) string {
 		return "application/octet-stream"
 	}
 
-	// Check for common file signatures
-	if len(data) >= 4 {
-		// JSON
-		trimmed := bytes.TrimSpace(data)
-		if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
-			return "application/json"
-		}
+	// Try structured data detection first
+	if contentType := d.detectStructuredData(data); contentType != "" {
+		return contentType
+	}
 
-		// XML
-		if bytes.HasPrefix(trimmed, []byte("<?xml")) {
-			return "application/xml"
-		}
-
-		// Image formats
-		if bytes.HasPrefix(data, []byte{0xFF, 0xD8, 0xFF}) {
-			return "image/jpeg"
-		}
-		if bytes.HasPrefix(data, []byte{0x89, 0x50, 0x4E, 0x47}) {
-			return "image/png"
-		}
-		if bytes.HasPrefix(data, []byte("GIF8")) {
-			return "image/gif"
-		}
-
-		// PDF
-		if bytes.HasPrefix(data, []byte("%PDF")) {
-			return "application/pdf"
-		}
+	// Try binary format detection
+	if contentType := d.detectBinaryFormats(data); contentType != "" {
+		return contentType
 	}
 
 	// Check if it's plain text (printable ASCII)
@@ -189,6 +169,69 @@ func (d *ContentDetector) DetectContentTypeFromBytes(data []byte) string {
 	}
 
 	return "application/octet-stream"
+}
+
+// detectStructuredData attempts to identify JSON and XML content types
+func (d *ContentDetector) detectStructuredData(data []byte) string {
+	if len(data) < 4 {
+		return ""
+	}
+
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return ""
+	}
+
+	// JSON detection
+	if trimmed[0] == '{' || trimmed[0] == '[' {
+		return "application/json"
+	}
+
+	// XML detection
+	if bytes.HasPrefix(trimmed, []byte("<?xml")) {
+		return "application/xml"
+	}
+
+	return ""
+}
+
+// detectBinaryFormats attempts to identify common binary file formats
+func (d *ContentDetector) detectBinaryFormats(data []byte) string {
+	if len(data) < 4 {
+		return ""
+	}
+
+	// Image formats
+	if contentType := d.detectImageFormats(data); contentType != "" {
+		return contentType
+	}
+
+	// PDF detection
+	if bytes.HasPrefix(data, []byte("%PDF")) {
+		return "application/pdf"
+	}
+
+	return ""
+}
+
+// detectImageFormats identifies common image file formats by their signatures
+func (d *ContentDetector) detectImageFormats(data []byte) string {
+	// JPEG
+	if bytes.HasPrefix(data, []byte{0xFF, 0xD8, 0xFF}) {
+		return "image/jpeg"
+	}
+
+	// PNG
+	if bytes.HasPrefix(data, []byte{0x89, 0x50, 0x4E, 0x47}) {
+		return "image/png"
+	}
+
+	// GIF
+	if bytes.HasPrefix(data, []byte("GIF8")) {
+		return "image/gif"
+	}
+
+	return ""
 }
 
 // isPlainText checks if the data appears to be plain text

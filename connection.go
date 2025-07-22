@@ -357,7 +357,14 @@ func (c *CachingConnection) tryParseHTTPRequestFromBuffer(requestBuffer []byte) 
 			query = req.URL.RawQuery
 		}
 
-		cacheKey := GenerateCacheKey(req.Method, req.URL.Path, query, headers)
+		// For HEAD requests, use GET method in cache key so they share cache entries
+		// This ensures consistency with the middleware layer behavior
+		method := req.Method
+		if method == "HEAD" {
+			method = "GET"
+		}
+
+		cacheKey := GenerateCacheKey(method, req.URL.Path, query, headers)
 
 		// Update cache key with proper locking
 		c.stateMu.Lock()

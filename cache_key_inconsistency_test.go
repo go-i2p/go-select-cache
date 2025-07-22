@@ -151,7 +151,7 @@ func TestMultipleRequestsCacheKeyConsistency(t *testing.T) {
 				req.Header.Set(k, v)
 			}
 
-			// Test consistency between both methods
+			// Test consistency between middleware layer and transport layer
 			middleware := &Middleware{}
 			selectcacheKey := middleware.createCacheKey(req)
 
@@ -160,14 +160,19 @@ func TestMultipleRequestsCacheKeyConsistency(t *testing.T) {
 				query = req.URL.RawQuery
 			}
 
-			cacheGoKey := GenerateCacheKey(req.Method, req.URL.Path, query, tc.headers)
+			// Transport layer now also converts HEAD to GET for consistency
+			method := req.Method
+			if method == "HEAD" {
+				method = "GET"
+			}
+			transportKey := GenerateCacheKey(method, req.URL.Path, query, tc.headers)
 
-			// FIXED: With the fix in place, these should be the same
+			// FIXED: With the fix in place, both layers should generate the same key
 			t.Logf("Request: %s %s", tc.method, tc.url)
 			t.Logf("  selectcache.go key: %s", selectcacheKey)
-			t.Logf("  cache.go key:      %s", cacheGoKey)
+			t.Logf("  transport layer key: %s", transportKey)
 
-			if selectcacheKey != cacheGoKey {
+			if selectcacheKey != transportKey {
 				t.Errorf("Cache key inconsistency still exists for %s (fix not working properly)", tc.name)
 			} else {
 				t.Logf("SUCCESS: Cache key consistency verified for %s", tc.name)
